@@ -1,0 +1,55 @@
+name: collect-wingo-30s
+
+on:
+  schedule:
+    # Runs automatically every 5 hours. Each run collects draws continuously for ~4.7 hours.
+    - cron: "0 */5 * * *"
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "Duration to run collector (in minutes, max 340)"
+        required: false
+        default: "280"
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wingo-collect
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install requests
+
+      - name: Fetch draws continuously and merge into data/wingo_30s.csv
+        run: |
+          MINUTES="${{ inputs.minutes }}"
+          if [ -z "$MINUTES" ]; then
+            MINUTES="280"
+          fi
+          echo "Running WinGo 30S collector for $MINUTES minutes..."
+          python collect.py --loop 25 --minutes "$MINUTES"
+
+      - name: Commit and push collected draws
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/wingo_30s.csv
+          if git diff --cached --quiet; then
+            echo "No new draws to commit"
+          else
+            git commit -m "data: sync wingo 30s draws [$(date -u +'%Y-%m-%d %H:%M') UTC]"
+            git pull --rebase
+            git push
+          fi
