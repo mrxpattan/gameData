@@ -25,6 +25,8 @@ jobs:
     timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
 
       - uses: actions/setup-python@v5
         with:
@@ -50,6 +52,14 @@ jobs:
             echo "No new draws to commit"
           else
             git commit -m "data: sync wingo 30s draws [$(date -u +'%Y-%m-%d %H:%M') UTC]"
-            git pull --rebase
-            git push
+            git pull origin main --rebase
+            git push origin HEAD:main
           fi
+
+      - name: Upload dataset as artifact (backup)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wingo-30s-csv-backup
+          path: data/wingo_30s.csv
+          if-no-files-found: ignore
