@@ -92,12 +92,21 @@ def find_gaps(issues):
     return sorted(gaps)
 
 
+def init_file_if_missing(path):
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=FIELDS)
+            w.writeheader()
+
+
 def run_once(a, session=None):
     if session is None:
         session = make_session()
 
     out = Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
+    init_file_if_missing(out)
     existing = load(out)
     newest = max(map(int, existing), default=None)
     fresh, error = {}, None
@@ -114,7 +123,8 @@ def run_once(a, session=None):
             for r in rows:
                 if r["issueNumber"] not in existing:
                     fresh[r["issueNumber"]] = r
-            if newest is not None and min(int(r["issueNumber"]) for r in rows) <= newest + 1:
+            valid_issue_ints = [int(r["issueNumber"]) for r in rows if r.get("issueNumber", "").isdigit()]
+            if newest is not None and valid_issue_ints and min(valid_issue_ints) <= newest + 1:
                 break
             if page >= int(d.get("totalPage") or page):
                 break
@@ -123,9 +133,14 @@ def run_once(a, session=None):
     except Exception as e:
         error = e
 
-    if error and existing:
-        log(f"[ERROR] Fetch failed: {error!r} - skipped, will retry on next poll")
-        return {}, len(existing), error
+    if error:
+        log(f"[ERROR] Fetch failed: {error!r}")
+        if existing:
+            log("Skipped this cycle, will retry on next poll")
+            return {}, len(existing), error
+        else:
+            log("No existing data available yet, will retry on next poll")
+            return {}, 0, error
 
     merged = {**existing, **fresh}
     if fresh:
