@@ -24,15 +24,20 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 350
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
           ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - run: pip install requests
+      - name: Install dependencies
+        run: pip install requests
 
       - name: Fetch draws continuously and merge into data/wingo_30s.csv
         run: |
@@ -47,12 +52,17 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/wingo_30s.csv
+          
+          mkdir -p data
+          if [ -f data/wingo_30s.csv ]; then
+            git add data/wingo_30s.csv
+          fi
+
           if git diff --cached --quiet; then
             echo "No new draws to commit"
           else
             git commit -m "data: sync wingo 30s draws [$(date -u +'%Y-%m-%d %H:%M') UTC]"
-            git pull origin main --rebase
+            git pull --rebase origin main || true
             git push origin HEAD:main
           fi
 
