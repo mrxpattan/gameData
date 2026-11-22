@@ -37,7 +37,25 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install requests
+        run: pip install requests curl_cffi
+
+      - name: Test API reachability & Cloudflare response
+        run: |
+          python -c "
+          for mod, name in [('requests', 'Standard requests'), ('curl_cffi.requests', 'curl_cffi Chrome-124')]:
+              try:
+                  m = __import__(mod, fromlist=['Session'])
+                  s = m.Session(impersonate='chrome124') if 'curl_cffi' in mod else m.Session()
+                  for host in ['draw.ar-lottery01.com', 'draw.ar-lottery02.com', 'draw.ar-lottery03.com', 'draw.ar-lottery.com']:
+                      try:
+                          r = s.get(f'https://{host}/WinGo/WinGo_30S/GetHistoryIssuePage.json', timeout=10)
+                          cnt = len(r.json().get('data', {}).get('list', [])) if r.status_code == 200 else 0
+                          print(f'[{name}] {host} -> status: {r.status_code}, draws: {cnt}')
+                      except Exception as e:
+                          print(f'[{name}] {host} -> error: {e}')
+              except Exception as e:
+                  print(f'Failed to import {mod}: {e}')
+          "
 
       - name: Fetch draws continuously and merge into data/wingo_30s.csv
         run: |
