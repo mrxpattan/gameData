@@ -2,8 +2,8 @@ name: collect-wingo-30s
 
 on:
   schedule:
-    # Runs automatically every 5 hours. Each run collects draws continuously for ~4.7 hours.
-    - cron: "0 */5 * * *"
+    # Watchdog cron: triggers every 2 hours as a backup in case a chain was ever interrupted
+    - cron: "0 */2 * * *"
   workflow_dispatch:
     inputs:
       minutes:
@@ -14,6 +14,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: wingo-collect
@@ -35,6 +36,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Configure Git for periodic syncing
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: Install dependencies
         run: pip install requests curl_cffi
@@ -63,14 +69,11 @@ jobs:
           if [ -z "$MINUTES" ]; then
             MINUTES="280"
           fi
-          echo "Running WinGo 30S collector for $MINUTES minutes..."
-          python collect.py --loop 25 --minutes "$MINUTES"
+          echo "Running WinGo 30S collector for $MINUTES minutes with 15-min periodic git syncing..."
+          python collect.py --loop 25 --minutes "$MINUTES" --sync-minutes 15
 
-      - name: Commit and push collected draws
+      - name: Commit and push final collected draws
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          
           mkdir -p data
           if [ -f data/wingo_30s.csv ]; then
             git add data/wingo_30s.csv
@@ -91,3 +94,15 @@ jobs:
           name: wingo-30s-csv-backup
           path: data/wingo_30s.csv
           if-no-files-found: ignore
+
+      - name: Trigger next continuous collection cycle
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Triggering next collection cycle to maintain unbroken 24/7 stream..."
+          gh workflow run collect.yml || curl -s -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/collect.yml/dispatches \
+            -d '{"ref":"main"}'
