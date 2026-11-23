@@ -13,6 +13,7 @@ Usage:
 """
 import argparse
 import csv
+import subprocess
 import sys
 import time
 from collections import defaultdict
@@ -194,6 +195,25 @@ def run_once(a, session=None, urls=None):
     return fresh, len(merged), error
 
 
+def git_sync_push(out_path):
+    """Periodically push new draws directly to the repository during long runs."""
+    try:
+        res = subprocess.run(["git", "status", "--porcelain", str(out_path)], capture_output=True, text=True)
+        if not res.stdout.strip():
+            return
+        log("[GIT-SYNC] Syncing newly collected draws to GitHub...")
+        subprocess.run(["git", "add", str(out_path)], check=True)
+        subprocess.run(
+            ["git", "commit", "-m", f"data: auto-sync wingo 30s draws [{time.strftime('%Y-%m-%d %H:%M')} UTC]"],
+            check=True
+        )
+        subprocess.run(["git", "pull", "--rebase", "origin", "main"], check=False)
+        subprocess.run(["git", "push", "origin", "HEAD:main"], check=True)
+        log("[GIT-SYNC] Successfully pushed fresh draws to repository.")
+    except Exception as e:
+        log(f"[GIT-SYNC] Periodic push skipped: {e}")
+
+
 def main():
     p = argparse.ArgumentParser(description="Collect WinGo 30S draw history into CSV.")
     p.add_argument("--url", default=ENDPOINTS[0],
@@ -211,6 +231,8 @@ def main():
                    help="Stop loop after MINUTES (e.g. --minutes 30 for verification test)")
     p.add_argument("--duration", type=int, default=0,
                    help="Stop loop after SECONDS (overrides --minutes)")
+    p.add_argument("--sync-minutes", type=int, default=15,
+                   help="Periodically commit and push to git every N minutes (default: 15, 0 to disable)")
     a = p.parse_args()
 
     session = make_session()
@@ -236,6 +258,7 @@ def main():
     polls_count = 0
     consecutive_errors = 0
     initial_rows = len(load(Path(a.out)))
+    last_sync_time = time.time()
 
     # On subsequent loop polls, we only need to fetch page 1 to check for new draws
     first_poll = True
@@ -257,6 +280,11 @@ def main():
             else:
                 consecutive_errors = 0
                 session_issues.update(fresh_dict.keys())
+
+            # Periodic git push to GitHub every a.sync_minutes
+            if a.sync_minutes > 0 and (time.time() - last_sync_time) >= a.sync_minutes * 60:
+                git_sync_push(Path(a.out))
+                last_sync_time = time.time()
 
             if end_time and time.time() >= end_time:
                 break
